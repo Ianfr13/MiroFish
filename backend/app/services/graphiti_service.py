@@ -17,6 +17,7 @@ from graphiti_core import Graphiti
 from graphiti_core.utils.bulk_utils import RawEpisode
 from graphiti_core.llm_client import OpenAIClient, LLMConfig
 from graphiti_core.embedder import OpenAIEmbedder, OpenAIEmbedderConfig
+from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.nodes import EntityNode, EpisodicNode, EpisodeType
 from graphiti_core.edges import EntityEdge
 from graphiti_core.search.search_config import (
@@ -93,14 +94,13 @@ class GraphitiService:
 
     async def _async_init(self):
         """Initialize the graphiti-core Graphiti instance and Neo4j connection."""
+        llm_config = LLMConfig(
+            api_key=Config.LLM_API_KEY,
+            base_url=Config.LLM_BASE_URL,
+            model=Config.LLM_MODEL_NAME,
+        )
         if self._llm_client is None:
-            self._llm_client = OpenAIClient(
-                config=LLMConfig(
-                    api_key=Config.LLM_API_KEY,
-                    base_url=Config.LLM_BASE_URL,
-                    model=Config.LLM_MODEL_NAME,
-                ),
-            )
+            self._llm_client = OpenAIClient(config=llm_config)
         if self._embedder is None:
             self._embedder = OpenAIEmbedder(
                 config=OpenAIEmbedderConfig(
@@ -108,6 +108,8 @@ class GraphitiService:
                     base_url=Config.LLM_BASE_URL,
                 ),
             )
+        if self._cross_encoder is None:
+            self._cross_encoder = OpenAIRerankerClient(config=llm_config)
         self._graphiti = Graphiti(
             uri=Config.NEO4J_URI,
             user=Config.NEO4J_USER,
