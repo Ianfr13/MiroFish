@@ -120,7 +120,7 @@ class GraphitiService:
             store_raw_episode_content=True,
         )
         await self._graphiti.build_indices_and_constraints(delete_existing=False)
-        self._driver = self._graphiti._clients.driver
+        self._driver = self._graphiti.driver
         self._initialized = True
         logger.info("GraphitiService initialized (Neo4j connected)")
 
