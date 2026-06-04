@@ -56,4 +56,4 @@ dev = [
 packages = ["app"]
 
 [tool.uv]
-constraint-dependencies = ["neo4j>=5.26.0"]
+override-dependencies = ["neo4j>=5.26.0"]
