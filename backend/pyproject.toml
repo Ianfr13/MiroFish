@@ -18,7 +18,7 @@ dependencies = [
 
     # graphiti-core + Neo4j 图数据库
     "graphiti-core>=0.29.0",
-    "neo4j>=5.0.0",
+    "neo4j>=5.26.0",
 
     # OASIS 社交媒体模拟
     "camel-oasis==0.2.5",
@@ -54,3 +54,6 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.uv]
+constraint-dependencies = ["neo4j>=5.26.0"]
