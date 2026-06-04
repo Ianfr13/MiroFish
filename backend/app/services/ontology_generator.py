@@ -414,7 +414,7 @@ class OntologyGenerator:
             '"""',
             '',
             'from pydantic import Field',
-            'from zep_cloud.external_clients.ontology import EntityModel, EntityText, EdgeModel',
+            '# (graphiti-core processes ontology via add_episode, no EntityModel base class needed)',
             '',
             '',
             '# ============== 实体类型定义 ==============',

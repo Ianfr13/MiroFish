@@ -16,12 +16,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from openai import OpenAI
-from zep_cloud.client import Zep
 
 from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.locale import get_language_instruction, get_locale, set_locale, t
 from .zep_entity_reader import EntityNode, ZepEntityReader
+from .graphiti_service import GraphitiService
 
 logger = get_logger('mirofish.oasis_profile')
 
@@ -198,16 +198,9 @@ class OasisProfileGenerator:
             base_url=self.base_url
         )
         
-        # Zep客户端用于检索丰富上下文
-        self.zep_api_key = zep_api_key or Config.ZEP_API_KEY
-        self.zep_client = None
+        # GraphitiService 用于检索丰富上下文
+        self.gs = GraphitiService.get_instance()
         self.graph_id = graph_id
-        
-        if self.zep_api_key:
-            try:
-                self.zep_client = Zep(api_key=self.zep_api_key)
-            except Exception as e:
-                logger.warning(f"Zep客户端初始化失败: {e}")
     
     def generate_profile_from_entity(
         self, 
@@ -298,7 +291,7 @@ class OasisProfileGenerator:
         """
         import concurrent.futures
         
-        if not self.zep_client:
+        if not self.gs:
             return {"facts": [], "node_summaries": [], "context": ""}
         
         entity_name = entity.name
@@ -321,49 +314,47 @@ class OasisProfileGenerator:
             max_retries = 3
             last_exception = None
             delay = 2.0
-            
+
             for attempt in range(max_retries):
                 try:
-                    return self.zep_client.graph.search(
+                    return self.gs.search(
+                        group_id=self.graph_id,
                         query=comprehensive_query,
-                        graph_id=self.graph_id,
                         limit=30,
                         scope="edges",
-                        reranker="rrf"
                     )
                 except Exception as e:
                     last_exception = e
                     if attempt < max_retries - 1:
-                        logger.debug(f"Zep边搜索第 {attempt + 1} 次失败: {str(e)[:80]}, 重试中...")
+                        logger.debug(f"Graph search 边搜索第 {attempt + 1} 次失败: {str(e)[:80]}, 重试中...")
                         time.sleep(delay)
                         delay *= 2
                     else:
-                        logger.debug(f"Zep边搜索在 {max_retries} 次尝试后仍失败: {e}")
+                        logger.debug(f"Graph search 边搜索在 {max_retries} 次尝试后仍失败: {e}")
             return None
-        
+
         def search_nodes():
             """搜索节点（实体摘要）- 带重试机制"""
             max_retries = 3
             last_exception = None
             delay = 2.0
-            
+
             for attempt in range(max_retries):
                 try:
-                    return self.zep_client.graph.search(
+                    return self.gs.search(
+                        group_id=self.graph_id,
                         query=comprehensive_query,
-                        graph_id=self.graph_id,
                         limit=20,
                         scope="nodes",
-                        reranker="rrf"
                     )
                 except Exception as e:
                     last_exception = e
                     if attempt < max_retries - 1:
-                        logger.debug(f"Zep节点搜索第 {attempt + 1} 次失败: {str(e)[:80]}, 重试中...")
+                        logger.debug(f"Graph search 节点搜索第 {attempt + 1} 次失败: {str(e)[:80]}, 重试中...")
                         time.sleep(delay)
                         delay *= 2
                     else:
-                        logger.debug(f"Zep节点搜索在 {max_retries} 次尝试后仍失败: {e}")
+                        logger.debug(f"Graph search 节点搜索在 {max_retries} 次尝试后仍失败: {e}")
             return None
         
         try:
