@@ -13,7 +13,8 @@ from datetime import datetime
 
 from pydantic import Field, create_model
 
-from graphiti_core import Graphiti, RawEpisode
+from graphiti_core import Graphiti
+from graphiti_core.utils.bulk_utils import RawEpisode
 from graphiti_core.llm_client import OpenAIClient
 from graphiti_core.embedder import OpenAIEmbedder
 from graphiti_core.nodes import EntityNode, EpisodicNode, EpisodeType
