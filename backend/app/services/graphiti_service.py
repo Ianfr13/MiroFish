@@ -15,8 +15,8 @@ from pydantic import Field, create_model
 
 from graphiti_core import Graphiti
 from graphiti_core.utils.bulk_utils import RawEpisode
-from graphiti_core.llm_client import OpenAIClient
-from graphiti_core.embedder import OpenAIEmbedder
+from graphiti_core.llm_client import OpenAIClient, LLMConfig
+from graphiti_core.embedder import OpenAIEmbedder, OpenAIEmbedderConfig
 from graphiti_core.nodes import EntityNode, EpisodicNode, EpisodeType
 from graphiti_core.edges import EntityEdge
 from graphiti_core.search.search_config import (
@@ -95,13 +95,18 @@ class GraphitiService:
         """Initialize the graphiti-core Graphiti instance and Neo4j connection."""
         if self._llm_client is None:
             self._llm_client = OpenAIClient(
-                api_key=Config.LLM_API_KEY,
-                base_url=Config.LLM_BASE_URL,
+                config=LLMConfig(
+                    api_key=Config.LLM_API_KEY,
+                    base_url=Config.LLM_BASE_URL,
+                    model=Config.LLM_MODEL_NAME,
+                ),
             )
         if self._embedder is None:
             self._embedder = OpenAIEmbedder(
-                api_key=Config.LLM_API_KEY,
-                base_url=Config.LLM_BASE_URL,
+                config=OpenAIEmbedderConfig(
+                    api_key=Config.LLM_API_KEY,
+                    base_url=Config.LLM_BASE_URL,
+                ),
             )
         self._graphiti = Graphiti(
             uri=Config.NEO4J_URI,
