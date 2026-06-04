@@ -47,16 +47,28 @@ logger = get_logger('mirofish.graphiti_service')
 
 class _DeepSeekOpenAIClient(OpenAIClient):
     """OpenAIClient that routes structured extraction through chat.completions
-    (json_object) instead of the OpenAI Responses API, which DeepSeek lacks."""
+    (json_object) instead of the OpenAI Responses API, which DeepSeek lacks.
+
+    Chat completions json_object only guarantees valid JSON, not a specific
+    schema — so we inject the Pydantic model's schema into the system prompt."""
 
     async def _create_structured_completion(
         self,
         model: str, messages, temperature: float | None, max_tokens: int,
         response_model: type[BaseModel], reasoning=None, verbosity=None,
     ):
-        # Bypass responses.parse() — use chat.completions with json_object.
+        schema = json.dumps(response_model.model_json_schema())
+        # Inject the required output schema into the messages so the LLM
+        # knows exactly which fields to produce (e.g. extracted_entities,
+        # not "nodes").  graphiti-core's prompts already describe the format
+        # in prose; this adds the machine-readable schema as a fallback.
+        schema_msg = {
+            "role": "system",
+            "content": "You must output a JSON object matching this schema: " + schema,
+        }
+        augmented = list(messages) + [schema_msg]
         return await self.client.chat.completions.create(
-            model=model, messages=messages, temperature=temperature,
+            model=model, messages=augmented, temperature=temperature,
             max_tokens=max_tokens,
             response_format={'type': 'json_object'},
         )
