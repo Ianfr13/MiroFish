@@ -6,12 +6,13 @@ Replaces: zep_cloud.client.Zep and backend/app/utils/zep_paging.py
 """
 
 import asyncio
+import json
 import threading
 import uuid
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timezone
 
-from pydantic import Field, create_model
+from pydantic import Field, create_model, BaseModel
 
 from graphiti_core import Graphiti
 from graphiti_core.utils.bulk_utils import RawEpisode
@@ -34,6 +35,38 @@ from ..config import Config
 from ..utils.logger import get_logger
 
 logger = get_logger('mirofish.graphiti_service')
+
+
+# ========== DeepSeek-compatible LLM Client ==========
+# graphiti-core 0.29.x OpenAIClient uses the OpenAI Responses API
+# (client.responses.parse()) for structured extraction.  DeepSeek does NOT
+# implement the /v1/responses endpoint — it returns 404.
+#
+# This subclass forces structured completions through the Chat Completions
+# API with response_format={'type':'json_object'}, which DeepSeek supports.
+
+class _DeepSeekOpenAIClient(OpenAIClient):
+    """OpenAIClient that routes structured extraction through chat.completions
+    (json_object) instead of the OpenAI Responses API, which DeepSeek lacks."""
+
+    async def _create_structured_completion(
+        self,
+        model: str, messages, temperature: float | None, max_tokens: int,
+        response_model: type[BaseModel], reasoning=None, verbosity=None,
+    ):
+        # Bypass responses.parse() — use chat.completions with json_object.
+        return await self.client.chat.completions.create(
+            model=model, messages=messages, temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={'type': 'json_object'},
+        )
+
+    def _handle_structured_response(self, response: Any) -> tuple[dict, int, int]:
+        """Parse a chat.completions json_object response (not Responses API)."""
+        result = response.choices[0].message.content or '{}'
+        prompt_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
+        completion_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
+        return json.loads(result), prompt_tokens, completion_tokens
 
 
 class GraphitiService:
@@ -109,7 +142,7 @@ class GraphitiService:
             model=Config.LLM_MODEL_NAME,
         )
         if self._llm_client is None:
-            self._llm_client = OpenAIClient(config=llm_config)
+            self._llm_client = _DeepSeekOpenAIClient(config=llm_config)
         if self._embedder is None:
             self._embedder = OpenAIEmbedder(
                 config=OpenAIEmbedderConfig(
