@@ -9,7 +9,7 @@ import asyncio
 import threading
 import uuid
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import Field, create_model
 
@@ -70,30 +70,39 @@ class GraphitiService:
 
     # ========== LIFECYCLE ==========
 
+    # Dedicated persistent event loop running in a background thread.
+    # ALL graphiti/Neo4j coroutines run on this single loop — the async Neo4j
+    # driver binds its connection pool to the loop it was created on, so using
+    # asyncio.run() per call would crash with "Future attached to a different loop".
+    _loop: Optional[asyncio.AbstractEventLoop] = None
+    _loop_thread: Optional[threading.Thread] = None
+
+    @classmethod
+    def _ensure_loop(cls) -> asyncio.AbstractEventLoop:
+        """Start the dedicated background event loop once (thread-safe)."""
+        with cls._lock:
+            if cls._loop is None or cls._loop.is_closed():
+                cls._loop = asyncio.new_event_loop()
+                cls._loop_thread = threading.Thread(
+                    target=cls._loop.run_forever,
+                    name="graphiti-event-loop",
+                    daemon=True,
+                )
+                cls._loop_thread.start()
+            return cls._loop
+
     def _ensure_initialized(self):
         """Lazy async init. Called before any API operation."""
         if self._initialized:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(self._async_init())
-        else:
-            import concurrent.futures
-            f = concurrent.futures.Future()
-
-            async def _wrap_init():
-                try:
-                    await self._async_init()
-                    f.set_result(None)
-                except Exception as e:
-                    f.set_exception(e)
-
-            loop.create_task(_wrap_init())
-            f.result(timeout=60)
+        self._run_async(self._async_init(), timeout=120)
 
     async def _async_init(self):
         """Initialize the graphiti-core Graphiti instance and Neo4j connection."""
+        # Guard against double-init: two threads may both submit _async_init,
+        # but both coroutines run serially on the same loop, so this check is safe.
+        if self._initialized:
+            return
         llm_config = LLMConfig(
             api_key=Config.LLM_API_KEY,
             base_url=Config.LLM_BASE_URL,
@@ -124,25 +133,16 @@ class GraphitiService:
         self._initialized = True
         logger.info("GraphitiService initialized (Neo4j connected)")
 
-    def _run_async(self, coro):
-        """Run an async coroutine synchronously, handling nested event loops."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-        else:
-            # Already in an event loop (unlikely for Flask, but safe)
-            import concurrent.futures
-            f = concurrent.futures.Future()
+    def _run_async(self, coro, timeout: float = 600):
+        """
+        Run a coroutine on the persistent background loop and wait synchronously.
 
-            async def _wrap():
-                try:
-                    f.set_result(await coro)
-                except Exception as e:
-                    f.set_exception(e)
-
-            loop.create_task(_wrap())
-            return f.result(timeout=600)
+        Safe to call from any thread (Flask request threads, background build
+        threads). All driver I/O stays on one loop, avoiding cross-loop errors.
+        """
+        loop = self._ensure_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=timeout)
 
     def close(self):
         """Close the Graphiti instance and Neo4j driver connection."""
@@ -307,7 +307,7 @@ class GraphitiService:
                         content=c,
                         source_description="Document text chunk",
                         source=EpisodeType.text,
-                        reference_time=datetime.now(),
+                        reference_time=datetime.now(timezone.utc),
                     )
                 )
                 eps.append(eu)
@@ -346,7 +346,7 @@ class GraphitiService:
             name=f"ep-{uuid.uuid4().hex[:8]}",
             episode_body=body,
             source_description=sdesc,
-            reference_time=datetime.now(),
+            reference_time=datetime.now(timezone.utc),
             source=src,
             group_id=gid,
             entity_types=et if et else None,
