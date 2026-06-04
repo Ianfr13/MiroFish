@@ -299,26 +299,27 @@ class GraphitiService:
 
             raw = []
             for c in batch:
-                eu = str(uuid.uuid4())
                 raw.append(
                     RawEpisode(
-                        name=f"chunk-{eu[:8]}",
-                        uuid=eu,
+                        name=f"chunk-{uuid.uuid4().hex[:8]}",
                         content=c,
                         source_description="Document text chunk",
                         source=EpisodeType.text,
                         reference_time=datetime.now(timezone.utc),
                     )
                 )
-                eps.append(eu)
 
-            await self._graphiti.add_episode_bulk(
+            result = await self._graphiti.add_episode_bulk(
                 bulk_episodes=raw,
                 group_id=group_id,
                 entity_types=etypes if etypes else None,
                 edge_types=edge_types if edge_types else None,
                 edge_type_map=etmap if etmap else None,
             )
+            # graphiti-core generates UUIDs internally; extract from results
+            if result and result.episodes:
+                for ep in result.episodes:
+                    eps.append(ep.uuid)
 
         return eps
 
