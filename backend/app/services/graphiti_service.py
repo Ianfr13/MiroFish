@@ -57,14 +57,19 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         model: str, messages, temperature: float | None, max_tokens: int,
         response_model: type[BaseModel], reasoning=None, verbosity=None,
     ):
-        schema = json.dumps(response_model.model_json_schema())
-        # Inject the required output schema into the messages so the LLM
-        # knows exactly which fields to produce (e.g. extracted_entities,
-        # not "nodes").  graphiti-core's prompts already describe the format
-        # in prose; this adds the machine-readable schema as a fallback.
+        # Extract just the top-level field names from the Pydantic schema.
+        # Sending the full schema with $defs confuses smaller models into
+        # echoing the schema instead of producing data.
+        raw = response_model.model_json_schema()
+        props = raw.get("properties", {})
+        fields = ", ".join(f'"{k}"' for k in props)
+        required = raw.get("required", [])
         schema_msg = {
             "role": "system",
-            "content": "You must output a JSON object matching this schema: " + schema,
+            "content": (
+                f'Output a JSON object with these fields: {fields}.'
+                + (f' Required fields: {", ".join(required)}.' if required else "")
+            ),
         }
         augmented = list(messages) + [schema_msg]
         return await self.client.chat.completions.create(
@@ -85,6 +90,11 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         prompt_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         completion_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
         data = json.loads(result)
+        # If the LLM regurgitated the JSON schema ($defs, properties) instead
+        # of producing data, return an empty dict — graphiti-core will retry.
+        if isinstance(data, dict) and any(k in data for k in ('$defs', '$schema')):
+            logger.warning('LLM returned JSON schema instead of data — retrying')
+            return {}, prompt_tokens, completion_tokens
         return _sanitize_for_neo4j(data), prompt_tokens, completion_tokens
 
     def _handle_json_response(self, response: Any) -> tuple[dict, int, int]:
