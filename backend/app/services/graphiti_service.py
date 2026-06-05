@@ -311,13 +311,15 @@ class GraphitiService:
 
         for ed in ontology.get("entity_types", []):
             name = ed["name"]
-            attrs = {
-                self._safe_attr_name(a["name"]): (
-                    Opt[str],
-                    Field(description=a.get("description", ""), default=None),
-                )
-                for a in ed.get("attributes", [])
-            }
+            attrs = {}
+            for a in ed.get("attributes", []):
+                if isinstance(a, str):
+                    attrs[self._safe_attr_name(a)] = (Opt[str], Field(default=None))
+                else:
+                    attrs[self._safe_attr_name(a["name"])] = (
+                        Opt[str],
+                        Field(description=a.get("description", ""), default=None),
+                    )
             entity_types[name] = create_model(
                 name,
                 __doc__=ed.get("description", f"A {name} entity."),
@@ -326,13 +328,15 @@ class GraphitiService:
 
         for ed in ontology.get("edge_types", []):
             name = ed["name"].upper()
-            attrs = {
-                self._safe_attr_name(a["name"]): (
-                    Opt[str],
-                    Field(description=a.get("description", ""), default=None),
-                )
-                for a in ed.get("attributes", [])
-            }
+            attrs = {}
+            for a in ed.get("attributes", []):
+                if isinstance(a, str):
+                    attrs[self._safe_attr_name(a)] = (Opt[str], Field(default=None))
+                else:
+                    attrs[self._safe_attr_name(a["name"])] = (
+                        Opt[str],
+                        Field(description=a.get("description", ""), default=None),
+                    )
             edge_types_dict[name] = create_model(
                 name,
                 __doc__=ed.get("description", f"A {name} relationship."),

@@ -298,6 +298,11 @@ class OntologyGenerator:
                 entity_name_map[original_name] = entity["name"]
             if "attributes" not in entity:
                 entity["attributes"] = []
+            # Normalize attributes: LLM may return strings instead of {name, description} dicts
+            entity["attributes"] = [
+                {"name": a, "description": a} if isinstance(a, str) else a
+                for a in entity["attributes"]
+            ]
             if "examples" not in entity:
                 entity["examples"] = []
             # 确保description不超过100字符
@@ -322,6 +327,10 @@ class OntologyGenerator:
                 edge["source_targets"] = []
             if "attributes" not in edge:
                 edge["attributes"] = []
+            edge["attributes"] = [
+                {"name": a, "description": a} if isinstance(a, str) else a
+                for a in edge["attributes"]
+            ]
             if len(edge.get("description", "")) > 100:
                 edge["description"] = edge["description"][:97] + "..."
         
