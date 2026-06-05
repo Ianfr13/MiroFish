@@ -279,7 +279,7 @@ class SimulationManager:
                 progress_callback("reading", 30, t('progress.readingNodeData'))
             
             filtered = reader.filter_defined_entities(
-                graph_id=state.graph_id,
+                group_id=state.graph_id,
                 defined_entity_types=defined_entity_types,
                 enrich_with_edges=True
             )

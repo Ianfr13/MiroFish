@@ -57,12 +57,6 @@ def get_graph_entities(graph_id: str):
         enrich: 是否获取相关边信息（默认true）
     """
     try:
-        if not Config.ZEP_API_KEY:
-            return jsonify({
-                "success": False,
-                "error": t('api.zepApiKeyMissing')
-            }), 500
-        
         entity_types_str = request.args.get('entity_types', '')
         entity_types = [t.strip() for t in entity_types_str.split(',') if t.strip()] if entity_types_str else None
         enrich = request.args.get('enrich', 'true').lower() == 'true'
@@ -71,7 +65,7 @@ def get_graph_entities(graph_id: str):
         
         reader = ZepEntityReader()
         result = reader.filter_defined_entities(
-            graph_id=graph_id,
+            group_id=graph_id,
             defined_entity_types=entity_types,
             enrich_with_edges=enrich
         )
@@ -94,12 +88,6 @@ def get_graph_entities(graph_id: str):
 def get_entity_detail(graph_id: str, entity_uuid: str):
     """获取单个实体的详细信息"""
     try:
-        if not Config.ZEP_API_KEY:
-            return jsonify({
-                "success": False,
-                "error": t('api.zepApiKeyMissing')
-            }), 500
-        
         reader = ZepEntityReader()
         entity = reader.get_entity_with_context(graph_id, entity_uuid)
         
@@ -127,17 +115,11 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
 def get_entities_by_type(graph_id: str, entity_type: str):
     """获取指定类型的所有实体"""
     try:
-        if not Config.ZEP_API_KEY:
-            return jsonify({
-                "success": False,
-                "error": t('api.zepApiKeyMissing')
-            }), 500
-        
         enrich = request.args.get('enrich', 'true').lower() == 'true'
-        
+
         reader = ZepEntityReader()
         entities = reader.get_entities_by_type(
-            graph_id=graph_id,
+            group_id=graph_id,
             entity_type=entity_type,
             enrich_with_edges=enrich
         )
@@ -475,7 +457,7 @@ def prepare_simulation():
             reader = ZepEntityReader()
             # 快速读取实体（不需要边信息，只统计数量）
             filtered_preview = reader.filter_defined_entities(
-                graph_id=state.graph_id,
+                group_id=state.graph_id,
                 defined_entity_types=entity_types_list,
                 enrich_with_edges=False  # 不获取边信息，加快速度
             )
@@ -1403,7 +1385,7 @@ def generate_profiles():
         
         reader = ZepEntityReader()
         filtered = reader.filter_defined_entities(
-            graph_id=graph_id,
+            group_id=graph_id,
             defined_entity_types=entity_types,
             enrich_with_edges=True
         )
