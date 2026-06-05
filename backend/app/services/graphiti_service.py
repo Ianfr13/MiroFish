@@ -76,7 +76,7 @@ class _DeepSeekOpenAIClient(OpenAIClient):
     def _handle_structured_response(self, response: Any) -> tuple[dict, int, int]:
         """Parse a chat.completions json_object response (not Responses API).
 
-        DeepSeek json_object mode only guarantees valid JSON — values may have
+        LLM json_object mode only guarantees valid JSON — values may have
         non-primitive types (nested dicts/lists) that Neo4j rejects with:
           Neo.ClientError.Statement.TypeError: Property values can only be of
           primitive types or arrays thereof.
@@ -87,15 +87,29 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         data = json.loads(result)
         return _sanitize_for_neo4j(data), prompt_tokens, completion_tokens
 
+    def _handle_json_response(self, response: Any) -> tuple[dict, int, int]:
+        """Parse non-structured JSON responses, also sanitizing for Neo4j."""
+        result = response.choices[0].message.content or '{}'
+        input_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
+        output_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
+        data = json.loads(result)
+        return _sanitize_for_neo4j(data), input_tokens, output_tokens
+
 
 # Neo4j only accepts primitive types (str, int, float, bool) or arrays thereof
-# at property values. DeepSeek json_object mode may produce nested dicts/lists.
-def _sanitize_for_neo4j(obj):
-    """Recursively flatten values to Neo4j-compatible primitives."""
+# at property values. LLM json_object mode may produce nested dicts as attribute
+# values — Neo4j rejects those. Flatten nested dicts to JSON strings.
+def _sanitize_for_neo4j(obj, _top=True):
+    """Convert nested dicts to JSON strings so Neo4j accepts them as properties.
+
+    The top-level object (the structured response wrapper) keeps its dict
+    structure. All nested dict values are serialized to JSON strings."""
     if isinstance(obj, dict):
-        return {k: _sanitize_for_neo4j(v) for k, v in obj.items()}
+        if _top:
+            return {k: _sanitize_for_neo4j(v, _top=False) for k, v in obj.items()}
+        return json.dumps(obj, ensure_ascii=False)
     if isinstance(obj, list):
-        return [_sanitize_for_neo4j(item) for item in obj]
+        return [_sanitize_for_neo4j(item, _top=False) for item in obj]
     if isinstance(obj, (int, float, bool, str, type(None))):
         return obj
     return str(obj)
