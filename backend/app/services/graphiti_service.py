@@ -158,8 +158,9 @@ class GraphitiService:
         if self._embedder is None:
             self._embedder = OpenAIEmbedder(
                 config=OpenAIEmbedderConfig(
-                    api_key=Config.LLM_API_KEY,
-                    base_url=Config.LLM_BASE_URL,
+                    api_key=Config.EMBEDDING_API_KEY,
+                    base_url=Config.EMBEDDING_BASE_URL,
+                    embedding_model=Config.EMBEDDING_MODEL_NAME,
                 ),
             )
         if self._cross_encoder is None:
