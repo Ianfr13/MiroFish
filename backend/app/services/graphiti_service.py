@@ -57,23 +57,11 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         model: str, messages, temperature: float | None, max_tokens: int,
         response_model: type[BaseModel], reasoning=None, verbosity=None,
     ):
-        # Extract just the top-level field names from the Pydantic schema.
-        # Sending the full schema with $defs confuses smaller models into
-        # echoing the schema instead of producing data.
-        raw = response_model.model_json_schema()
-        props = raw.get("properties", {})
-        fields = ", ".join(f'"{k}"' for k in props)
-        required = raw.get("required", [])
-        schema_msg = {
-            "role": "system",
-            "content": (
-                f'Output a JSON object with these fields: {fields}.'
-                + (f' Required fields: {", ".join(required)}.' if required else "")
-            ),
-        }
-        augmented = list(messages) + [schema_msg]
+        # graphiti-core's prompts already describe the required output format.
+        # Use json_object mode to guarantee valid JSON without injecting schema
+        # hints that confuse smaller models into echoing the schema itself.
         return await self.client.chat.completions.create(
-            model=model, messages=augmented, temperature=temperature,
+            model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens,
             response_format={'type': 'json_object'},
         )
