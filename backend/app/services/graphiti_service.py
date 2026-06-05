@@ -97,19 +97,18 @@ class _DeepSeekOpenAIClient(OpenAIClient):
 
 
 # Neo4j only accepts primitive types (str, int, float, bool) or arrays thereof
-# at property values. LLM json_object mode may produce nested dicts as attribute
-# values — Neo4j rejects those. Flatten nested dicts to JSON strings.
-def _sanitize_for_neo4j(obj, _top=True):
-    """Convert nested dicts to JSON strings so Neo4j accepts them as properties.
-
-    The top-level object (the structured response wrapper) keeps its dict
-    structure. All nested dict values are serialized to JSON strings."""
+# at property values. LLM json_object mode may produce nested dicts inside
+# attribute values — Neo4j rejects those. Serialise those to JSON strings.
+def _sanitize_for_neo4j(obj, _depth=0):
+    """Recurse through the response. Dicts at depth >= 2 (nested attribute
+    values) are serialised to JSON strings so Neo4j can store them.
+    Lists DO NOT increment depth — entity objects inside lists stay as dicts."""
     if isinstance(obj, dict):
-        if _top:
-            return {k: _sanitize_for_neo4j(v, _top=False) for k, v in obj.items()}
-        return json.dumps(obj, ensure_ascii=False)
+        if _depth >= 2:
+            return json.dumps(obj, ensure_ascii=False)
+        return {k: _sanitize_for_neo4j(v, _depth + 1) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_sanitize_for_neo4j(item, _top=False) for item in obj]
+        return [_sanitize_for_neo4j(item, _depth) for item in obj]
     if isinstance(obj, (int, float, bool, str, type(None))):
         return obj
     return str(obj)
