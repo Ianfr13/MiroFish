@@ -67,30 +67,34 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         )
 
     def _handle_structured_response(self, response: Any) -> tuple[dict, int, int]:
-        """Parse a chat.completions json_object response (not Responses API).
-
-        LLM json_object mode only guarantees valid JSON — values may have
-        non-primitive types (nested dicts/lists) that Neo4j rejects with:
-          Neo.ClientError.Statement.TypeError: Property values can only be of
-          primitive types or arrays thereof.
-        Sanitize all values recursively before returning."""
-        result = response.choices[0].message.content or '{}'
+        """Parse a chat.completions json_object response (not Responses API)."""
+        raw = response.choices[0].message.content or '{}'
         prompt_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         completion_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
-        data = json.loads(result)
-        # If the LLM regurgitated the JSON schema ($defs, properties) instead
-        # of producing data, return an empty dict — graphiti-core will retry.
+        data = json.loads(raw)
+        # Reject schema regurgitation — graphiti-core will retry
         if isinstance(data, dict) and any(k in data for k in ('$defs', '$schema')):
             logger.warning('LLM returned JSON schema instead of data — retrying')
             return {}, prompt_tokens, completion_tokens
+        # Some models return a list when json_object should enforce an object.
+        # Wrap in a dict under a best-guess key so Pydantic gets a mapping.
+        if isinstance(data, list):
+            logger.warning(f'LLM returned JSON array instead of object — wrapping (len={len(data)})')
+            data = {'extracted_entities': data, 'extracted_edges': []}
+        elif not isinstance(data, dict):
+            data = {}
         return _sanitize_for_neo4j(data), prompt_tokens, completion_tokens
 
     def _handle_json_response(self, response: Any) -> tuple[dict, int, int]:
         """Parse non-structured JSON responses, also sanitizing for Neo4j."""
-        result = response.choices[0].message.content or '{}'
+        raw = response.choices[0].message.content or '{}'
         input_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         output_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
-        data = json.loads(result)
+        data = json.loads(raw)
+        if isinstance(data, list):
+            data = {'items': data}
+        elif not isinstance(data, dict):
+            data = {}
         return _sanitize_flat_json(data), input_tokens, output_tokens
 
 
