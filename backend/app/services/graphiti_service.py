@@ -74,11 +74,31 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         )
 
     def _handle_structured_response(self, response: Any) -> tuple[dict, int, int]:
-        """Parse a chat.completions json_object response (not Responses API)."""
+        """Parse a chat.completions json_object response (not Responses API).
+
+        DeepSeek json_object mode only guarantees valid JSON — values may have
+        non-primitive types (nested dicts/lists) that Neo4j rejects with:
+          Neo.ClientError.Statement.TypeError: Property values can only be of
+          primitive types or arrays thereof.
+        Sanitize all values recursively before returning."""
         result = response.choices[0].message.content or '{}'
         prompt_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         completion_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
-        return json.loads(result), prompt_tokens, completion_tokens
+        data = json.loads(result)
+        return _sanitize_for_neo4j(data), prompt_tokens, completion_tokens
+
+
+# Neo4j only accepts primitive types (str, int, float, bool) or arrays thereof
+# at property values. DeepSeek json_object mode may produce nested dicts/lists.
+def _sanitize_for_neo4j(obj):
+    """Recursively flatten values to Neo4j-compatible primitives."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_neo4j(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_neo4j(item) for item in obj]
+    if isinstance(obj, (int, float, bool, str, type(None))):
+        return obj
+    return str(obj)
 
 
 class GraphitiService:
