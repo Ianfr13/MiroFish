@@ -57,13 +57,11 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         model: str, messages, temperature: float | None, max_tokens: int,
         response_model: type[BaseModel], reasoning=None, verbosity=None,
     ):
-        # graphiti-core's prompts already describe the required output format.
-        # Use json_object mode to guarantee valid JSON without injecting schema
-        # hints that confuse smaller models into echoing the schema itself.
+        # Gemini via OpenRouter doesn't support response_format json_object.
+        # graphiti-core prompts are detailed enough to guide the output format.
         return await self.client.chat.completions.create(
             model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens,
-            response_format={'type': 'json_object'},
         )
 
     def _handle_structured_response(self, response: Any) -> tuple[dict, int, int]:
@@ -71,17 +69,18 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         raw = response.choices[0].message.content or '{}'
         prompt_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         completion_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
-        data = json.loads(raw)
+        data = _extract_json(raw)
         # Reject schema regurgitation — graphiti-core will retry
         if isinstance(data, dict) and any(k in data for k in ('$defs', '$schema')):
             logger.warning('LLM returned JSON schema instead of data — retrying')
             return {}, prompt_tokens, completion_tokens
-        # Some models return a list when json_object should enforce an object.
-        # Wrap in a dict under a best-guess key so Pydantic gets a mapping.
+        # Some models return a list when the prompt asks for an object.
+        # Wrap under a best-guess key so Pydantic gets a mapping.
         if isinstance(data, list):
-            logger.warning(f'LLM returned JSON array instead of object — wrapping (len={len(data)})')
+            logger.warning(f'LLM returned JSON array (len={len(data)}) — wrapping')
             data = {'extracted_entities': data, 'extracted_edges': []}
         elif not isinstance(data, dict):
+            logger.warning(f'LLM returned non-dict ({type(data).__name__}) — using empty dict')
             data = {}
         return _sanitize_for_neo4j(data), prompt_tokens, completion_tokens
 
@@ -90,13 +89,43 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         raw = response.choices[0].message.content or '{}'
         input_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         output_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
-        data = json.loads(raw)
+        data = _extract_json(raw)
         if isinstance(data, list):
             data = {'items': data}
         elif not isinstance(data, dict):
             data = {}
         return _sanitize_flat_json(data), input_tokens, output_tokens
 
+
+def _extract_json(text: str):
+    """Extract a JSON object or array from text that may contain markdown."""
+    import re
+    text = text.strip()
+    # Strip ```json ... ``` fences
+    m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if m:
+        text = m.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Last resort: find first { or [ and matching close
+        for start_char, end_char in (('{', '}'), ('[', ']')):
+            start = text.find(start_char)
+            if start >= 0:
+                depth, end = 0, start
+                for i, c in enumerate(text[start:], start):
+                    if c == start_char: depth += 1
+                    elif c == end_char:
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:end])
+                    except json.JSONDecodeError:
+                        pass
+        return {}
 
 # Neo4j only accepts primitive types (str, int, float, bool) or arrays thereof
 # at property values. LLM json_object mode may produce nested dicts as attribute
