@@ -152,6 +152,7 @@ class GraphitiService:
             api_key=Config.LLM_API_KEY,
             base_url=Config.LLM_BASE_URL,
             model=Config.LLM_MODEL_NAME,
+            small_model=Config.LLM_MODEL_NAME,
         )
         if self._llm_client is None:
             self._llm_client = _DeepSeekOpenAIClient(config=llm_config)
