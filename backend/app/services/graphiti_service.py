@@ -82,7 +82,7 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         elif not isinstance(data, dict):
             logger.warning(f'LLM returned non-dict ({type(data).__name__}) — using empty dict')
             data = {}
-        return _sanitize_for_neo4j(data), prompt_tokens, completion_tokens
+        return _sanitize_for_neo4j(_normalize_response(data)), prompt_tokens, completion_tokens
 
     def _handle_json_response(self, response: Any) -> tuple[dict, int, int]:
         """Parse non-structured JSON responses, also sanitizing for Neo4j."""
@@ -94,8 +94,41 @@ class _DeepSeekOpenAIClient(OpenAIClient):
             data = {'items': data}
         elif not isinstance(data, dict):
             data = {}
-        return _sanitize_flat_json(data), input_tokens, output_tokens
+        return _sanitize_flat_json(_normalize_response(data)), input_tokens, output_tokens
 
+
+def _normalize_entity(obj):
+    """Fix common LLM field-name mismatches so Pydantic validation passes."""
+    if not isinstance(obj, dict):
+        return obj
+    # Map known alternative keys
+    ALIASES = {
+        'entity_type_name': 'entity_type',
+        'entity_summary': 'summary',
+        'entity_name': 'name',
+    }
+    for old, new in ALIASES.items():
+        if old in obj and new not in obj:
+            obj[new] = obj.pop(old)
+    # Generate name if missing
+    if 'name' not in obj:
+        obj['name'] = obj.get('entity_type', obj.get('summary', 'Entity'))
+    return obj
+
+def _normalize_response(data):
+    """Recursively normalize entity/edge dicts in LLM responses."""
+    if isinstance(data, dict):
+        # Find entity lists under common keys and normalize each item
+        for key in list(data):
+            val = data[key]
+            if isinstance(val, list) and all(isinstance(v, dict) for v in val):
+                data[key] = [_normalize_entity(v) for v in val]
+            elif isinstance(val, (dict, list)):
+                data[key] = _normalize_response(val)
+        return _normalize_entity(data)
+    if isinstance(data, list):
+        return [_normalize_response(item) for item in data]
+    return data
 
 def _extract_json(text: str):
     """Extract a JSON object or array from text that may contain markdown."""
