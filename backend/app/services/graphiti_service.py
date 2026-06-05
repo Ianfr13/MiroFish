@@ -93,22 +93,36 @@ class _DeepSeekOpenAIClient(OpenAIClient):
         input_tokens = getattr(getattr(response, 'usage', None), 'prompt_tokens', 0) or 0
         output_tokens = getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0
         data = json.loads(result)
-        return _sanitize_for_neo4j(data), input_tokens, output_tokens
+        return _sanitize_flat_json(data), input_tokens, output_tokens
 
 
 # Neo4j only accepts primitive types (str, int, float, bool) or arrays thereof
-# at property values. LLM json_object mode may produce nested dicts inside
-# attribute values — Neo4j rejects those. Serialise those to JSON strings.
+# at property values. LLM json_object mode may produce nested dicts as attribute
+# values — Neo4j rejects those. Serialise dict values at depth >= 3 to JSON
+# strings. Lists do not increment depth. A structured entity response like
+# {"extracted_entities": [{...entity...}, ...]} keeps entities as dicts (depth
+# 1) and their attributes dict values at depth 2, so only dicts nested inside
+# attribute values (depth >= 3) get flattened.
 def _sanitize_for_neo4j(obj, _depth=0):
-    """Recurse through the response. Dicts at depth >= 2 (nested attribute
-    values) are serialised to JSON strings so Neo4j can store them.
-    Lists DO NOT increment depth — entity objects inside lists stay as dicts."""
     if isinstance(obj, dict):
-        if _depth >= 2:
+        if _depth >= 3:
             return json.dumps(obj, ensure_ascii=False)
         return {k: _sanitize_for_neo4j(v, _depth + 1) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_sanitize_for_neo4j(item, _depth) for item in obj]
+    if isinstance(obj, (int, float, bool, str, type(None))):
+        return obj
+    return str(obj)
+
+# Non-structured JSON responses (entity summarization, attribute extraction) are
+# shallower — entity objects don't appear here, so threshold 2 is safe.
+def _sanitize_flat_json(obj, _depth=0):
+    if isinstance(obj, dict):
+        if _depth >= 2:
+            return json.dumps(obj, ensure_ascii=False)
+        return {k: _sanitize_flat_json(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_flat_json(item, _depth) for item in obj]
     if isinstance(obj, (int, float, bool, str, type(None))):
         return obj
     return str(obj)
@@ -364,7 +378,6 @@ class GraphitiService:
 
     async def _async_add_text_batches(self, group_id, chunks, batch_size, progress_cb):
         eps = []
-        etypes, edge_types, etmap = self._ontology_cache.get(group_id, ({}, {}, {}))
         total = len(chunks)
         total_batches = (total + batch_size - 1) // batch_size
 
@@ -392,9 +405,6 @@ class GraphitiService:
             result = await self._graphiti.add_episode_bulk(
                 bulk_episodes=raw,
                 group_id=group_id,
-                entity_types=etypes if etypes else None,
-                edge_types=edge_types if edge_types else None,
-                edge_type_map=etmap if etmap else None,
             )
             # graphiti-core generates UUIDs internally; extract from results
             if result and result.episodes:
@@ -421,7 +431,6 @@ class GraphitiService:
         )
 
     async def _async_add_single(self, gid, body, sdesc, stype):
-        et, ed, em = self._ontology_cache.get(gid, ({}, {}, {}))
         src = EpisodeType.text if stype == "text" else EpisodeType.message
         r = await self._graphiti.add_episode(
             name=f"ep-{uuid.uuid4().hex[:8]}",
@@ -430,9 +439,6 @@ class GraphitiService:
             reference_time=datetime.now(timezone.utc),
             source=src,
             group_id=gid,
-            entity_types=et if et else None,
-            edge_types=ed if ed else None,
-            edge_type_map=em if em else None,
         )
         return r.episode.uuid
 
